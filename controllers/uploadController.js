@@ -11,8 +11,7 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
-// Cambia la ruta de las cookies a /tmp para que sea escribible
-const COOKIES_PATH = '/tmp/cookies.txt';
+const COOKIES_PATH = '/tmp/cookies.txt'; // Asegúrate que el archivo está aquí y con permisos de lectura
 
 export const uploadSong = async (req, res) => {
   try {
@@ -63,8 +62,8 @@ export const downloadAndUploadSong = async (req, res) => {
   const folderName = `music-player/${safeName}_${user.id}`;
 
   try {
-    // Usa --no-write-cookies para evitar que yt-dlp intente escribir el archivo cookies
-    const getTitleCmd = `yt-dlp --cookies ${COOKIES_PATH} --no-write-cookies --get-title "${url}"`;
+    // Obtén el título sin la opción --no-write-cookies (que no existe)
+    const getTitleCmd = `yt-dlp --cookies ${COOKIES_PATH} --get-title "${url}"`;
 
     exec(getTitleCmd, (err, stdout, stderr) => {
       if (err) {
@@ -80,7 +79,6 @@ export const downloadAndUploadSong = async (req, res) => {
 
       const ytdlp = spawn('yt-dlp', [
         '--cookies', COOKIES_PATH,
-        '--no-write-cookies',
         '-x',
         '--audio-format', 'mp3',
         '-o', outputFile,
