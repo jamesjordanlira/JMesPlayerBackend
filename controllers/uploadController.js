@@ -1,9 +1,8 @@
 import dotenv from 'dotenv';
 import cloudinary from '../helpers/cloudinary.js';
 import fs from 'fs';
-import fsExtra from 'fs-extra';
 import path from 'path';
-import ytdl from 'ytdl-core';
+import { spawn, exec } from 'child_process';
 
 dotenv.config();
 
@@ -49,12 +48,11 @@ export const uploadSong = async (req, res) => {
   }
 };
 
-
 export const downloadAndUploadSong = async (req, res) => {
   const { url } = req.body;
 
-  if (!url || !ytdl.validateURL(url)) {
-    return res.status(400).json({ error: 'URL inválida o no proporcionada' });
+  if (!url) {
+    return res.status(400).json({ error: 'URL requerida' });
   }
 
   const user = req.usuario;
@@ -62,47 +60,61 @@ export const downloadAndUploadSong = async (req, res) => {
   const folderName = `music-player/${safeName}_${user.id}`;
 
   try {
-    // Obtener título usando ytdl-core
-    const info = await ytdl.getInfo(url);
-    const rawTitle = info.videoDetails.title;
-    const title = rawTitle.replace(/[^a-zA-Z0-9-_ ]/g, '').replace(/\s+/g, '_'); // Limpia título
+    exec(`yt-dlp --get-title "${url}"`, (err, stdout) => {
+      if (err) {
+        console.error('❌ Error obteniendo título:', err);
+        return res.status(500).json({ error: 'Error obteniendo título' });
+      }
 
-    const outputFile = path.join(outputDir, `${title}.mp3`);
+      const title = stdout.trim().replace(/[^a-zA-Z0-9-_ ]/g, '');
+      const outputFile = path.join(outputDir, `${title}.mp3`);
 
-    console.log(`🎵 Descargando audio de: ${url}`);
+      console.log(`🎵 Descargando audio de: ${url}`);
 
-    // Descarga audio y guarda en archivo
-    await new Promise((resolve, reject) => {
-      ytdl(url, { filter: 'audioonly', quality: 'highestaudio' })
-        .pipe(fs.createWriteStream(outputFile))
-        .on('finish', resolve)
-        .on('error', reject);
+      const ytdlp = spawn('yt-dlp', [
+        '-x',
+        '--audio-format', 'mp3',
+        '-o', outputFile,
+        url
+      ]);
+
+      ytdlp.stderr.on('data', (data) => {
+        console.error(`⚠️ yt-dlp: ${data.toString()}`);
+      });
+
+      ytdlp.on('close', async (code) => {
+        if (code !== 0) {
+          console.error(`❌ yt-dlp salió con código: ${code}`);
+          return res.status(500).json({ error: 'Error al descargar el audio' });
+        }
+
+        try {
+          const result = await cloudinary.uploader.upload(outputFile, {
+            resource_type: 'video',
+            folder: folderName,
+            public_id: title,
+            use_filename: true,
+            unique_filename: false,
+            overwrite: false,
+          });
+
+          fs.unlinkSync(outputFile);
+
+          res.json({
+            secure_url: result.secure_url,
+            title: result.public_id
+          });
+        } catch (uploadErr) {
+          console.error('❌ Error subiendo a Cloudinary:', uploadErr);
+          res.status(500).json({ error: 'Error al subir el archivo' });
+        }
+      });
     });
-
-    // Sube a Cloudinary
-    const result = await cloudinary.uploader.upload(outputFile, {
-      resource_type: 'video',
-      folder: folderName,
-      public_id: title,
-      use_filename: true,
-      unique_filename: false,
-      overwrite: false,
-    });
-
-    // Elimina archivo local
-    await fsExtra.remove(outputFile);
-
-    res.json({
-      secure_url: result.secure_url,
-      title: result.public_id
-    });
-
   } catch (err) {
     console.error('❌ Error general:', err);
-    res.status(500).json({ error: 'Error inesperado al descargar y subir canción' });
+    res.status(500).json({ error: 'Error inesperado' });
   }
 };
-
 
 export const getSongs = async (req, res) => {
   try {
