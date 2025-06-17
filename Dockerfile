@@ -25,5 +25,5 @@ COPY . .
 # Expone el puerto que usará tu app (ajusta si usas otro puerto)
 EXPOSE 3000
 
-# Comando para iniciar tu app
+# Comando para iniciar tu app 
 CMD ["node", "index.js"]
