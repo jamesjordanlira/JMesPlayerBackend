@@ -69,3 +69,6 @@ desktop.ini     # Archivos de Windows
 .nyc_output/
 *.test.js.snap
 *.spec.js.snap
+
+#cookies
+cookies.txt
