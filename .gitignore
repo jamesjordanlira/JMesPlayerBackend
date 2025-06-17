@@ -1,0 +1,71 @@
+# Dependencias de Node.js
+node_modules/
+npm-debug.log
+.npm/
+.yarn-integrity
+.pnp.cjs
+.pnp.loader.cjs
+
+# Archivos de entorno y configuración local
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.DS_Store
+.local
+*.log
+logs/
+temp/
+tmp/
+*.sqlite
+*.sqlite3
+*.db
+*.csv # Si generas reportes o datos temporales aquí
+
+# Archivos de compilación y transpilación (si aplica)
+/dist/
+/build/
+/out/
+/coverage/
+/public/build/ # Si tu frontend genera assets aquí
+/public/dist/  # Si tu frontend genera assets aquí
+
+# Archivos específicos de IDEs y editores
+.vscode/        # Configuración de VS Code (opcional, si no la compartes)
+.idea/          # Archivos de IntelliJ IDEA
+*.sublime-project
+*.sublime-workspace
+*.swp           # Archivos swap de Vim
+*.swo           # Archivos swap de Vim
+*.bak           # Archivos de backup
+
+# Archivos del sistema operativo
+.DS_Store       # Archivos de macOS
+Thumbs.db       # Archivos de Windows
+desktop.ini     # Archivos de Windows
+
+# Archivos de credenciales o seguridad (¡NUNCA los subas!)
+*.key
+*.pem
+*.p12
+*.crt
+*.cert
+*.jks
+
+# Archivos de paquetes comprimidos
+*.zip
+*.tar
+*.gz
+*.rar
+
+# Archivos de Docker (si aplica)
+.dockerignore
+!Dockerfile # Generalmente, no ignoras el Dockerfile en sí
+!docker-compose.yml # Generalmente, no ignoras el docker-compose.yml en sí
+.docker-build/
+
+# Archivos de depuración y pruebas
+.nyc_output/
+*.test.js.snap
+*.spec.js.snap
