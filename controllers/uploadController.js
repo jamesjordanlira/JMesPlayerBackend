@@ -12,8 +12,7 @@ if (!fs.existsSync(outputDir)) {
 }
 
 // Cambia el path a algo escribible
-const COOKIES_PATH = '/tmp/cookies.txt';
-
+const COOKIES_PATH = '/etc/secrets/cookies.txt';
 export const uploadSong = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
