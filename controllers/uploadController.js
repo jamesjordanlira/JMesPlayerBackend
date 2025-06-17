@@ -11,6 +11,9 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
+// Cambia el path a algo escribible
+const COOKIES_PATH = '/tmp/cookies.txt';
+
 export const uploadSong = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -60,22 +63,24 @@ export const downloadAndUploadSong = async (req, res) => {
   const folderName = `music-player/${safeName}_${user.id}`;
 
   try {
-    exec(`yt-dlp --cookies /etc/secrets/cookies.txt --get-title "${url}"`, (err, stdout) => {
+    const getTitleCmd = `yt-dlp --cookies ${COOKIES_PATH} --get-title "${url}"`;
+
+    exec(getTitleCmd, (err, stdout, stderr) => {
       if (err) {
         console.error('❌ Error obteniendo título:', err);
+        console.error('⚠️ STDERR:', stderr);
         return res.status(500).json({ error: 'Error obteniendo título' });
       }
 
       const title = stdout.trim().replace(/[^a-zA-Z0-9-_ ]/g, '');
-      const safeTitle = title.replace(/[^a-zA-Z0-9-_]/g, '_');
-      const outputFile = path.join(outputDir, `${safeTitle}.mp3`);
+      const outputFile = path.join(outputDir, `${title}.mp3`);
 
       console.log(`🎵 Descargando audio de: ${url}`);
 
       const ytdlp = spawn('yt-dlp', [
+        '--cookies', COOKIES_PATH,
         '-x',
         '--audio-format', 'mp3',
-        '--cookies', '/etc/secrets/cookies.txt',
         '-o', outputFile,
         url
       ]);
@@ -87,7 +92,6 @@ export const downloadAndUploadSong = async (req, res) => {
       ytdlp.on('close', async (code) => {
         if (code !== 0) {
           console.error(`❌ yt-dlp salió con código: ${code}`);
-          if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
           return res.status(500).json({ error: 'Error al descargar el audio' });
         }
 
@@ -95,7 +99,7 @@ export const downloadAndUploadSong = async (req, res) => {
           const result = await cloudinary.uploader.upload(outputFile, {
             resource_type: 'video',
             folder: folderName,
-            public_id: safeTitle,
+            public_id: title,
             use_filename: true,
             unique_filename: false,
             overwrite: false,
@@ -109,7 +113,6 @@ export const downloadAndUploadSong = async (req, res) => {
           });
         } catch (uploadErr) {
           console.error('❌ Error subiendo a Cloudinary:', uploadErr);
-          if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
           res.status(500).json({ error: 'Error al subir el archivo' });
         }
       });
