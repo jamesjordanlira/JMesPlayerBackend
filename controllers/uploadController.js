@@ -11,10 +11,6 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
-// Define la ruta a tu archivo de cookies.
-// Asegúrate de que 'cookies.txt' exista en la raíz de tu proyecto o ajusta la ruta si lo pones en otro lugar.
-const cookiesFilePath = path.resolve('./cookies.txt');
-
 export const uploadSong = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -22,24 +18,21 @@ export const uploadSong = async (req, res) => {
     }
 
     const user = req.usuario;
-    // Limpia el nombre del usuario para usarlo en la ruta de la carpeta
     const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
     const folderName = `music-player/${safeName}_${user.id}`;
 
     const uploads = await Promise.all(req.files.map(async (file) => {
       const originalName = path.parse(file.originalname).name;
 
-      // Sube el archivo a Cloudinary
       const result = await cloudinary.uploader.upload(file.path, {
-        resource_type: 'video', // Se usa 'video' para archivos de audio en Cloudinary si quieres transcodificación completa
+        resource_type: 'video',
         folder: folderName,
         public_id: originalName,
         use_filename: true,
         unique_filename: false,
-        overwrite: false, // Evita sobrescribir si ya existe un archivo con el mismo nombre
+        overwrite: false,
       });
 
-      // Elimina el archivo temporal después de subirlo
       fs.unlinkSync(file.path);
 
       return {
@@ -67,80 +60,63 @@ export const downloadAndUploadSong = async (req, res) => {
   const folderName = `music-player/${safeName}_${user.id}`;
 
   try {
-    // Primero, intenta obtener el título del video/audio usando yt-dlp.
-    // Incluye el flag --cookies para autenticación.
-    exec(`yt-dlp --cookies "${cookiesFilePath}" --get-title "${url}"`, (err, stdout) => {
+    exec(`yt-dlp --cookies /etc/secrets/cookies.txt --get-title "${url}"`, (err, stdout) => {
       if (err) {
         console.error('❌ Error obteniendo título:', err);
-        // Detecta si el error es de autenticación para dar un mensaje más claro al usuario
-        if (err.message.includes("Sign in to confirm you’re not a bot") || err.message.includes("See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp for how to manually pass cookies")) {
-            return res.status(403).json({ error: 'Acceso denegado: Este video requiere autenticación de YouTube. Asegúrate de que tu archivo de cookies sea válido y la cuenta esté iniciada sesión.' });
-        }
-        return res.status(500).json({ error: 'Error obteniendo título del video.' });
+        return res.status(500).json({ error: 'Error obteniendo título' });
       }
 
-      // Limpia el título obtenido para que sea un nombre de archivo seguro
       const title = stdout.trim().replace(/[^a-zA-Z0-9-_ ]/g, '');
-      const outputFile = path.join(outputDir, `${title}.mp3`);
+      const safeTitle = title.replace(/[^a-zA-Z0-9-_]/g, '_');
+      const outputFile = path.join(outputDir, `${safeTitle}.mp3`);
 
-      console.log(`🎵 Descargando audio de: ${url} como "${title}.mp3"`);
+      console.log(`🎵 Descargando audio de: ${url}`);
 
-      // Inicia la descarga del audio usando yt-dlp como un proceso separado.
-      // También se le pasa el flag --cookies aquí.
       const ytdlp = spawn('yt-dlp', [
-        '-x',                  // Extrae el audio
-        '--audio-format', 'mp3', // Formato de audio MP3
-        '-o', outputFile,      // Ruta de salida del archivo
-        '--cookies', cookiesFilePath, // Pasa el archivo de cookies
-        url                    // La URL del video/audio
+        '-x',
+        '--audio-format', 'mp3',
+        '--cookies', '/etc/secrets/cookies.txt',
+        '-o', outputFile,
+        url
       ]);
 
-      // Muestra la salida de error de yt-dlp en la consola del servidor
       ytdlp.stderr.on('data', (data) => {
-        console.error(`⚠️ yt-dlp stderr: ${data.toString()}`);
+        console.error(`⚠️ yt-dlp: ${data.toString()}`);
       });
 
-      // Maneja el cierre del proceso yt-dlp
       ytdlp.on('close', async (code) => {
         if (code !== 0) {
-          console.error(`❌ yt-dlp salió con código de error: ${code}. No se pudo descargar el audio.`);
-          // Si hubo un error en la descarga, intenta eliminar cualquier archivo parcial que se haya creado
-          if (fs.existsSync(outputFile)) {
-              fs.unlinkSync(outputFile);
-          }
-          return res.status(500).json({ error: 'Error al descargar el audio. Verifique la URL o si el video requiere autenticación.' });
+          console.error(`❌ yt-dlp salió con código: ${code}`);
+          if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+          return res.status(500).json({ error: 'Error al descargar el audio' });
         }
 
-        console.log(`✅ Audio descargado: ${outputFile}`);
-
         try {
-          // Sube el archivo descargado a Cloudinary
           const result = await cloudinary.uploader.upload(outputFile, {
-            resource_type: 'video', // Usar 'video' es común para archivos de audio que requieren transcodificación.
+            resource_type: 'video',
             folder: folderName,
-            public_id: title,
+            public_id: safeTitle,
             use_filename: true,
             unique_filename: false,
             overwrite: false,
           });
 
-          // Elimina el archivo local después de subirlo a Cloudinary
           fs.unlinkSync(outputFile);
-          console.log(`☁️ Archivo subido a Cloudinary: ${result.secure_url}`);
 
           res.json({
             secure_url: result.secure_url,
             title: result.public_id
           });
         } catch (uploadErr) {
-          console.error('❌ Error subiendo a Cloudinary después de descargar:', uploadErr);
-          res.status(500).json({ error: 'Error al subir el archivo a Cloudinary.' });
+          console.error('❌ Error subiendo a Cloudinary:', uploadErr);
+          if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+          res.status(500).json({ error: 'Error al subir el archivo' });
         }
       });
     });
   } catch (err) {
-    console.error('❌ Error general en downloadAndUploadSong:', err);
-    res.status(500).json({ error: 'Error inesperado en el servidor.' });
+    console.error('❌ Error general:', err);
+    res.status(500).json({ error: 'Error inesperado' });
   }
 };
 
@@ -150,14 +126,12 @@ export const getSongs = async (req, res) => {
     const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
     const folderName = `music-player/${safeName}_${user.id}`;
 
-    // Busca canciones en la carpeta específica del usuario en Cloudinary
     const result = await cloudinary.search
       .expression(`folder:${folderName}`)
-      .sort_by('created_at', 'desc') // Ordena por fecha de creación descendente
-      .max_results(30) // Limita a 30 resultados
+      .sort_by('created_at', 'desc')
+      .max_results(30)
       .execute();
 
-    // Mapea los resultados para obtener solo el título (filename) y la URL segura
     const songs = result.resources.map(song => ({
       title: song.filename,
       secure_url: song.secure_url
@@ -166,6 +140,6 @@ export const getSongs = async (req, res) => {
     res.json(songs);
   } catch (err) {
     console.error('❌ Error al obtener canciones:', err);
-    res.status(500).json({ error: 'Error al obtener canciones.' });
+    res.status(500).json({ error: 'Error al obtener canciones' });
   }
 };
