@@ -1,14 +1,13 @@
 # Usa una imagen oficial de Node.js con Debian
 FROM node:18
 
-# Instala python3, pip y ffmpeg (para procesamiento de audio)
-RUN apt-get update && apt-get install -y python3 python3-pip ffmpeg \
-    # Instala yt-dlp globalmente sin usar --user
-    && pip3 install --no-cache-dir yt-dlp \
-    # Crea enlace simbólico para yt-dlp en /usr/local/bin para que esté en el PATH
-    && ln -s $(python3 -m site --user-base)/bin/yt-dlp /usr/local/bin/yt-dlp \
-    # Limpia caches para reducir el tamaño final
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+# Instala dependencias necesarias y yt-dlp
+RUN apt-get update && \
+    apt-get install -y curl ffmpeg python3 && \
+    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
+    chmod a+rx /usr/local/bin/yt-dlp && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 # Define el directorio de trabajo dentro del contenedor
 WORKDIR /app
