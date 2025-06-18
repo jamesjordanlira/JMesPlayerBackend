@@ -21,7 +21,11 @@ RUN npm install
 # Copia el resto del código fuente
 COPY . .
 
-# Crea el directorio de descargas temporal y da permisos
+# Copia el archivo cookies.txt a un lugar persistente
+COPY cookies.txt /app/cookies.txt
+RUN chmod 644 /app/cookies.txt
+
+# Si necesitas un directorio de descargas temporal
 RUN mkdir -p /app/descargas && chmod -R 777 /app/descargas
 
 # Expone el puerto que usará tu app
