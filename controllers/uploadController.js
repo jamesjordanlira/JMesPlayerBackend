@@ -216,26 +216,41 @@ export const uploadSong = async (req, res) => {
   }
 };
 
+
 export const getSongs = async (req, res) => {
   try {
     const user = req.usuario;
     const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
     const folderName = `music-player/${safeName}_${user.id}`;
 
-    const result = await cloudinary.search
-      .expression(`folder:${folderName}`)
-      .sort_by('created_at', 'desc')
-      .max_results(30)
-      .execute();
+    let allSongs = [];
+    let nextCursor = null;
 
-    const songs = result.resources.map(song => ({
-      title: song.filename,
-      secure_url: song.secure_url
-    }));
+    do {
+      const query = cloudinary.search
+        .expression(`folder:${folderName}`)
+        .sort_by('created_at', 'desc')
+        .max_results(500);
 
-    res.json(songs);
+      if (nextCursor) {
+        query.next_cursor(nextCursor);
+      }
+
+      const result = await query.execute();
+
+      const songs = result.resources.map(song => ({
+        title: song.filename,
+        secure_url: song.secure_url
+      }));
+
+      allSongs = allSongs.concat(songs);
+      nextCursor = result.next_cursor;
+    } while (nextCursor);
+
+    res.json(allSongs);
   } catch (err) {
     console.error('❌ Error al obtener canciones:', err);
     res.status(500).json({ error: 'Error al obtener canciones.' });
   }
 };
+
