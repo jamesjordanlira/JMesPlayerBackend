@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import cloudinary from '../helpers/cloudinary.js'; // Asegúrate de que esta ruta sea correcta
+import cloudinary from '../helpers/cloudinary.js';
 import fs from 'fs';
 import path from 'path';
 import { spawn, exec } from 'child_process';
@@ -7,25 +7,79 @@ import { spawn, exec } from 'child_process';
 dotenv.config();
 
 // Directorio temporal para almacenar los archivos de audio descargados
-// Usamos /tmp para asegurar permisos de escritura en entornos Docker/Render
-const outputDir = path.resolve('/tmp/descargas'); // Cambiado a /tmp para entornos de servidor
+const outputDir = path.resolve('/tmp/descargas');
 
 // Asegura que el directorio de salida exista
 if (!fs.existsSync(outputDir)) {
   try {
-    fs.mkdirSync(outputDir, { recursive: true }); // `recursive: true` crea directorios anidados si no existen
+    fs.mkdirSync(outputDir, { recursive: true });
     console.log(`✅ Directorio de descargas creado: ${outputDir}`);
   } catch (mkDirErr) {
     console.error(`❌ Error al crear el directorio de descargas ${outputDir}:`, mkDirErr);
-    // Un error aquí significa que el servicio probablemente no podrá funcionar
-    // Puedes considerar salir del proceso con process.exit(1) en un entorno de producción
   }
 }
 
 // Ruta al archivo de cookies.
-// Esta variable de entorno debe apuntar a la ruta donde Docker COPIA el archivo cookies.txt
-// Por defecto: '/tmp/cookies.txt'
 const COOKIES_PATH = process.env.COOKIES_PATH || '/tmp/cookies.txt';
+
+// --- INICIO: Lógica para manejar el inicio del servidor con retraso ---
+// Esta lógica se ejecutará una vez cuando el módulo sea importado (al inicio de tu app)
+async function initializeCookiesCheck() {
+  // Añadir un pequeño retraso para asegurar que el sistema de archivos esté listo
+  // Esto es para mitigar posibles race conditions en entornos de contenedores
+  await new Promise(resolve => setTimeout(resolve, 1000)); // Espera 1 segundo
+
+  console.log(`--- INICIO DIAGNÓSTICO COOKIES ---`);
+  console.log(`DEBUG: Valor de COOKIES_PATH: "${COOKIES_PATH}"`);
+
+  try {
+    console.log(`DEBUG: Contenido de /tmp/`);
+    const tmpContents = fs.readdirSync('/tmp');
+    tmpContents.forEach(item => console.log(`DEBUG:   - /tmp/${item}`));
+  } catch (lsError) {
+    console.error(`DEBUG: Error al listar /tmp/:`, lsError);
+  }
+
+  if (!fs.existsSync(COOKIES_PATH)) {
+    console.error(`❌ Error (DEBUG): fs.existsSync(${COOKIES_PATH}) devolvió false.`);
+    try {
+      const parentDir = path.dirname(COOKIES_PATH);
+      console.log(`DEBUG: Intentando listar el directorio padre de cookies: ${parentDir}`);
+      const parentContents = fs.readdirSync(parentDir);
+      parentContents.forEach(item => console.log(`DEBUG:   - ${parentDir}/${item}`));
+    } catch (parentDirLsError) {
+      console.error(`DEBUG: Error al listar directorio padre de cookies:`, parentDirLsError);
+    }
+    // Lanza un error crítico que probablemente detendrá el inicio del servidor
+    throw new Error(`CRITICAL: Archivo de cookies no encontrado en: ${COOKIES_PATH}`);
+  } else {
+    console.log(`✅ DEBUG: fs.existsSync(${COOKIES_PATH}) devolvió true. El archivo existe.`);
+    try {
+      const cookieContentPreview = fs.readFileSync(COOKIES_PATH, 'utf8').substring(0, 100) + '...';
+      console.log(`✅ DEBUG: Contenido de cookies (primeros 100 chars): ${cookieContentPreview}`);
+      const cookieStats = fs.statSync(COOKIES_PATH);
+      console.log(`✅ DEBUG: Estadísticas de cookies: size=${cookieStats.size}, mode=${cookieStats.mode.toString(8)}`);
+    } catch (readErr) {
+      console.error(`❌ DEBUG: Error al leer el archivo de cookies ${COOKIES_PATH} (posible problema de permisos):`, readErr);
+      // Lanza un error crítico si no se puede leer el archivo a pesar de existir
+      throw new Error(`CRITICAL: No se pudo leer el archivo de cookies en: ${COOKIES_PATH} (permisos?)`);
+    }
+  }
+  console.log(`--- FIN DIAGNÓSTICO COOKIES ---`);
+}
+
+// Llama a la función de inicialización. Si esto está en un archivo que es importado al inicio
+// de tu app (ej. en index.js o server.js), se ejecutará automáticamente.
+// Si tu servidor Express se inicia inmediatamente, considera poner el inicio del servidor
+// DENTRO de un .then() de esta promesa, o usa un patrón async/await en tu archivo principal.
+// Para este caso, como es un controlador, lo dejamos así y la comprobación se ejecuta.
+initializeCookiesCheck().catch(err => {
+  console.error('❌ Fallo crítico en la verificación inicial de cookies:', err.message);
+  // Opcional: Podrías usar process.exit(1) aquí para detener el contenedor si es un error fatal
+  // process.exit(1);
+});
+// --- FIN: Lógica para manejar el inicio del servidor con retraso ---
+
 
 export const uploadSong = async (req, res) => {
   try {
@@ -33,16 +87,15 @@ export const uploadSong = async (req, res) => {
       return res.status(400).json({ error: 'No se subieron archivos' });
     }
 
-    const user = req.usuario; // Asume que el usuario está autenticado y disponible en req.usuario
+    const user = req.usuario;
     const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
     const folderName = `music-player/${safeName}_${user.id}`;
 
     const uploads = await Promise.all(req.files.map(async (file) => {
       const originalName = path.parse(file.originalname).name;
 
-      // Sube el archivo a Cloudinary
       const result = await cloudinary.uploader.upload(file.path, {
-        resource_type: 'video', // 'video' es común para audio en Cloudinary si se necesita transcodificación
+        resource_type: 'video',
         folder: folderName,
         public_id: originalName,
         use_filename: true,
@@ -50,7 +103,6 @@ export const uploadSong = async (req, res) => {
         overwrite: false,
       });
 
-      // Elimina el archivo temporal después de subirlo
       fs.unlinkSync(file.path);
       console.log(`🗑️ Archivo temporal eliminado: ${file.path}`);
 
@@ -75,37 +127,32 @@ export const downloadAndUploadSong = async (req, res) => {
     return res.status(400).json({ error: 'URL requerida' });
   }
 
-  const user = req.usuario; // Asume que el usuario está autenticado
+  const user = req.usuario;
   const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
   const folderName = `music-player/${safeName}_${user.id}`;
 
-  let outputFile = null; // Declarar aquí para asegurar su alcance en los bloques catch/finally
+  let outputFile = null;
 
   try {
-    // Verificar si el archivo de cookies existe ANTES de intentar usarlo
-    // Ahora, COOKIES_PATH es la ruta donde Docker lo copió
+    // Esta verificación adicional dentro de la función de ruta es buena práctica,
+    // pero si la inicialización falló con un error crítico, el servidor no estaría corriendo.
     if (!fs.existsSync(COOKIES_PATH)) {
-      console.error(`❌ Error: El archivo de cookies NO existe en la ruta: ${COOKIES_PATH}. Asegúrate de que el Dockerfile lo copie correctamente y la variable COOKIES_PATH esté bien configurada en Render.`);
-      // Devuelve un 500 porque es un problema de configuración del servidor
+      console.error(`❌ Error (runtime check): El archivo de cookies no existe en la ruta: ${COOKIES_PATH}`);
       return res.status(500).json({ error: 'Configuración de cookies no encontrada en el servidor. Contacte al administrador.' });
     }
-    console.log(`✅ Archivo de cookies encontrado en: ${COOKIES_PATH}`);
+    // No volvemos a loguear "Archivo de cookies encontrado" si ya lo hizo el diagnóstico inicial
+
 
     // --- Paso 1: Obtener el título usando yt-dlp ---
-    // Incluye --cookies para autenticación.
-    // Usamos `exec` para una ejecución simple de un solo comando que devuelve stdout/stderr
     const getTitleCmd = `yt-dlp --cookies "${COOKIES_PATH}" --get-title "${url}"`;
     console.log(`ℹ️ Ejecutando comando para obtener título: ${getTitleCmd}`);
 
     const { stdout, stderr } = await new Promise((resolve, reject) => {
       exec(getTitleCmd, (err, stdout, stderr) => {
         if (err) {
-          // Si hay un error, loguea stderr para más detalles
           console.error('❌ Error en exec (obtener título):', err);
           console.error('⚠️ STDERR de yt-dlp (get-title):', stderr);
-          // Mensaje más específico si el error es de autenticación
           if (stderr.includes("Sign in to confirm you’re not a bot") || stderr.includes("See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp")) {
-              // Rechaza con un error específico para el catch principal
               return reject(new Error('ACCESO_DENEGADO_AUTH_REQUIRED'));
           }
           return reject(new Error('FALLO_OBTENER_TITULO'));
@@ -114,28 +161,25 @@ export const downloadAndUploadSong = async (req, res) => {
       });
     });
 
-    const title = stdout.trim().replace(/[^a-zA-Z0-9-_ ]/g, ''); // Limpiar el título para nombre de archivo
-    outputFile = path.join(outputDir, `${title}.mp3`); // Ruta completa del archivo de audio
+    const title = stdout.trim().replace(/[^a-zA-Z0-9-_ ]/g, '');
+    outputFile = path.join(outputDir, `${title}.mp3`);
 
     console.log(`🎵 Título obtenido: "${title}". Archivo de salida esperado: ${outputFile}`);
     console.log(`🎵 Iniciando descarga de audio de: ${url}`);
 
     // --- Paso 2: Descargar el audio usando yt-dlp ---
-    // Usamos `spawn` para procesos de larga duración y para manejar el flujo de stdout/stderr en tiempo real
     const ytdlp = spawn('yt-dlp', [
-      '--cookies', COOKIES_PATH, // Pasa el archivo de cookies para la descarga
-      '-x',                  // Extraer audio
-      '--audio-format', 'mp3', // Formato de audio MP3
-      '-o', outputFile,      // Ruta de salida del archivo
-      url                    // La URL del video/audio
+      '--cookies', COOKIES_PATH,
+      '-x',
+      '--audio-format', 'mp3',
+      '-o', outputFile,
+      url
     ]);
 
-    // Log de la salida de error de yt-dlp en tiempo real
     ytdlp.stderr.on('data', (data) => {
       console.error(`⚠️ yt-dlp STDERR (descarga): ${data.toString().trim()}`);
     });
 
-    // Manejar el cierre del proceso yt-dlp
     const downloadPromise = new Promise((resolve, reject) => {
       ytdlp.on('close', (code) => {
         if (code !== 0) {
@@ -152,10 +196,9 @@ export const downloadAndUploadSong = async (req, res) => {
       });
     });
 
-    await downloadPromise; // Esperar a que la descarga termine
+    await downloadPromise;
 
     // --- Paso 3: Subir el archivo descargado a Cloudinary ---
-    // Verificar si el archivo realmente se creó y no está vacío (opcional, pero buena práctica)
     if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
         console.error(`❌ El archivo descargado no existe o está vacío: ${outputFile}`);
         throw new Error('ARCHIVO_DESCARGADO_INVALIDO');
@@ -163,12 +206,12 @@ export const downloadAndUploadSong = async (req, res) => {
 
     console.log(`☁️ Subiendo archivo a Cloudinary: ${outputFile}`);
     const result = await cloudinary.uploader.upload(outputFile, {
-      resource_type: 'video', // Usar 'video' es común para archivos de audio en Cloudinary que requieren transcodificación.
+      resource_type: 'video',
       folder: folderName,
-      public_id: title, // Usar el título limpio como public_id
-      use_filename: true, // Usar el filename original si no se especifica public_id
-      unique_filename: false, // No añadir sufijo único, confiar en public_id
-      overwrite: false, // No sobrescribir si ya existe un archivo con el mismo nombre
+      public_id: title,
+      use_filename: true,
+      unique_filename: false,
+      overwrite: false,
     });
 
     console.log(`☁️ Archivo subido a Cloudinary: ${result.secure_url}`);
@@ -183,7 +226,6 @@ export const downloadAndUploadSong = async (req, res) => {
     });
 
   } catch (err) {
-    // Manejo de errores centralizado
     console.error('❌ Error en downloadAndUploadSong (catch principal):', err);
 
     let errorMessage = 'Error inesperado al procesar la solicitud.';
@@ -200,14 +242,14 @@ export const downloadAndUploadSong = async (req, res) => {
         errorMessage = 'No se pudo iniciar el proceso de descarga. El sistema yt-dlp podría no estar instalado o configurado correctamente en el servidor.';
     } else if (err.message === 'ARCHIVO_DESCARGADO_INVALIDO') {
         errorMessage = 'El archivo de audio descargado está vacío o corrupto. Es posible que la descarga haya fallado silenciosamente.';
-    } else if (err.message.includes('uploadErr') || (err.http_code && err.http_code >= 400)) { // Errores de subida de Cloudinary
+    } else if (err.message.includes('uploadErr') || (err.http_code && err.http_code >= 400)) {
         errorMessage = 'Error al subir el archivo a Cloudinary. Verifique las credenciales.';
         statusCode = 500;
+    } else if (err.message.includes('CRITICAL: Archivo de cookies no encontrado') || err.message.includes('CRITICAL: No se pudo leer el archivo de cookies')) {
+        errorMessage = err.message; // Usar el mensaje detallado del error crítico de inicio
+        statusCode = 500;
     }
-    // No necesitamos un `else if` para el error de `fs.existsSync` si ya lo retornamos antes
-    // o si el catch de arriba lo manejaría.
-
-    // Asegurarse de limpiar el archivo descargado si existe
+    
     if (outputFile && fs.existsSync(outputFile)) {
       try {
         fs.unlinkSync(outputFile);
@@ -226,14 +268,12 @@ export const getSongs = async (req, res) => {
     const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
     const folderName = `music-player/${safeName}_${user.id}`;
 
-    // Busca canciones en la carpeta específica del usuario en Cloudinary
     const result = await cloudinary.search
       .expression(`folder:${folderName}`)
       .sort_by('created_at', 'desc')
       .max_results(30)
       .execute();
 
-    // Mapea los resultados para obtener solo el título (filename) y la URL segura
     const songs = result.resources.map(song => ({
       title: song.filename,
       secure_url: song.secure_url
