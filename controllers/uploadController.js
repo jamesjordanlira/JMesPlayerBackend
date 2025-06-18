@@ -11,7 +11,8 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir);
 }
 
-const COOKIES_PATH = '/tmp/cookies.txt'; // Asegúrate que el archivo está aquí y con permisos de lectura
+// Ruta al archivo de cookies desde variable de entorno o por defecto
+const COOKIES_PATH = process.env.COOKIES_PATH || '/tmp/cookies.txt';
 
 export const uploadSong = async (req, res) => {
   try {
@@ -57,12 +58,15 @@ export const downloadAndUploadSong = async (req, res) => {
     return res.status(400).json({ error: 'URL requerida' });
   }
 
+  if (!fs.existsSync(COOKIES_PATH)) {
+    return res.status(500).json({ error: 'El archivo de cookies no existe en el servidor' });
+  }
+
   const user = req.usuario;
   const safeName = user.nombre.replace(/[^a-zA-Z0-9-_]/g, '');
   const folderName = `music-player/${safeName}_${user.id}`;
 
   try {
-    // Obtén el título sin la opción --no-write-cookies (que no existe)
     const getTitleCmd = `yt-dlp --cookies ${COOKIES_PATH} --get-title "${url}"`;
 
     exec(getTitleCmd, (err, stdout, stderr) => {
