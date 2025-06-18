@@ -21,9 +21,6 @@ RUN npm install
 # Copia el resto del código fuente
 COPY . .
 
-# Copia tu archivo cookies.txt al directorio /tmp, que es escribible
-COPY cookies.txt /tmp/cookies.txt
-
 # Expone el puerto que usará tu app (ajusta si usas otro puerto)
 EXPOSE 3000
 
