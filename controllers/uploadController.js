@@ -18,32 +18,16 @@ if (!fs.existsSync(outputDir)) {
   }
 }
 
-const COOKIES_PATH = process.env.COOKIES_PATH || '/app/cookies.txt';
+// Aquí puedes cambiar el navegador que usas para extraer cookies, ej. 'chrome', 'firefox', 'edge'
+const BROWSER_NAME = process.env.BROWSER_NAME || 'chrome';
 
-async function initializeCookiesCheck() {
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  console.log(`--- INICIO DIAGNÓSTICO COOKIES ---`);
-  console.log(`DEBUG: Valor de COOKIES_PATH: "${COOKIES_PATH}"`);
-
-  if (!fs.existsSync(COOKIES_PATH)) {
-    console.error(`❌ Error: El archivo de cookies no existe en: ${COOKIES_PATH}`);
-    throw new Error(`CRITICAL: Archivo de cookies no encontrado en: ${COOKIES_PATH}`);
-  } else {
-    console.log(`✅ El archivo de cookies existe en: ${COOKIES_PATH}`);
-  }
-
-  console.log(`--- FIN DIAGNÓSTICO COOKIES ---`);
-}
-
-initializeCookiesCheck().catch(err => {
-  console.error('❌ Fallo crítico en la verificación inicial de cookies:', err.message);
-});
-
-// Función auxiliar para obtener el título
-function getTitle(url, cookiesPath) {
+async function getTitle(url) {
   return new Promise((resolve, reject) => {
-    const ytdlp = spawn('yt-dlp', ['--cookies', cookiesPath, '--get-title', url]);
+    const ytdlp = spawn('yt-dlp', [
+      '--cookies-from-browser', BROWSER_NAME,
+      '--get-title',
+      url
+    ]);
 
     let output = '';
     let errorOutput = '';
@@ -91,18 +75,14 @@ export const downloadAndUploadSong = async (req, res) => {
   let outputFile = null;
 
   try {
-    if (!fs.existsSync(COOKIES_PATH)) {
-      return res.status(500).json({ error: 'Configuración de cookies no encontrada en el servidor.' });
-    }
-
     console.log(`🎵 Obteniendo título del video: ${url}`);
-    const titleRaw = await getTitle(url, COOKIES_PATH);
+    const titleRaw = await getTitle(url);
     const title = titleRaw.replace(/[^a-zA-Z0-9-_ ]/g, '');
     outputFile = path.join(outputDir, `${title}.mp3`);
     console.log(`🎵 Título: "${title}", archivo: ${outputFile}`);
 
     const ytdlp = spawn('yt-dlp', [
-      '--cookies', COOKIES_PATH,
+      '--cookies-from-browser', BROWSER_NAME,
       '-x',
       '--audio-format', 'mp3',
       '-o', outputFile,
@@ -179,6 +159,7 @@ export const downloadAndUploadSong = async (req, res) => {
   }
 };
 
+// El resto del código (uploadSong, getSongs) igual que antes, sin cambios
 export const uploadSong = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
