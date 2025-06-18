@@ -21,20 +21,14 @@ RUN npm install
 # Copia el resto del código fuente
 COPY . .
 
-# *** LÍNEAS MODIFICADAS/AÑADIDAS AQUÍ ***
-# Copia el archivo cookies.txt a una ruta accesible y temporal
-# Asegúrate de que tu archivo cookies.txt esté en la raíz de tu proyecto local
-COPY cookies.txt /tmp/cookies.txt
-# Establece permisos de lectura explícitos para el archivo de cookies
-RUN chmod 644 /tmp/cookies.txt
+# Copia el archivo cookies.txt a un lugar persistente
+COPY cookies.txt /app/cookies.txt
+RUN chmod 644 /app/cookies.txt
 
+# Si necesitas un directorio de descargas temporal
+RUN mkdir -p /app/descargas && chmod -R 777 /app/descargas
 
-# Si necesitas un directorio de descargas temporal, créalo y asegúrate de permisos
-RUN mkdir -p /tmp/descargas && chmod -R 777 /tmp/descargas
-#debug
-RUN ls -l /tmp/ && head -n 10 /tmp/cookies.txt
-
-# Expone el puerto que usará tu app (ajusta si usas otro puerto)
+# Expone el puerto que usará tu app
 EXPOSE 3000
 
 # Comando para iniciar tu app

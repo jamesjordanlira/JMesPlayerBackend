@@ -7,7 +7,7 @@ import { spawn, exec } from 'child_process';
 dotenv.config();
 
 // Directorio temporal para almacenar los archivos de audio descargados
-const outputDir = path.resolve('/tmp/descargas');
+const outputDir = path.resolve('/app/descargas');
 
 // Asegura que el directorio de salida exista
 if (!fs.existsSync(outputDir)) {
@@ -20,7 +20,7 @@ if (!fs.existsSync(outputDir)) {
 }
 
 // Ruta al archivo de cookies.
-const COOKIES_PATH = process.env.COOKIES_PATH || '/tmp/cookies.txt';
+const COOKIES_PATH = process.env.COOKIES_PATH || '/app/cookies.txt';
 
 // --- INICIO: Lógica para manejar el inicio del servidor con retraso ---
 // Esta lógica se ejecutará una vez cuando el módulo sea importado (al inicio de tu app)
