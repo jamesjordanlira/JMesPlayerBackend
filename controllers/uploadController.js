@@ -17,12 +17,14 @@ if (!fs.existsSync(outputDir)) {
     console.log(`✅ Directorio de descargas creado: ${outputDir}`);
   } catch (mkDirErr) {
     console.error(`❌ Error al crear el directorio de descargas ${outputDir}:`, mkDirErr);
-    // Podrías considerar salir del proceso o manejar este error de forma más robusta
+    // Un error aquí significa que el servicio probablemente no podrá funcionar
+    // Puedes considerar salir del proceso con process.exit(1) en un entorno de producción
   }
 }
 
-// Ruta al archivo de cookies obtenida de una variable de entorno
-// Render usará lo que configures en COOKIES_PATH, si no, por defecto será '/tmp/cookies.txt'
+// Ruta al archivo de cookies.
+// Esta variable de entorno debe apuntar a la ruta donde Docker COPIA el archivo cookies.txt
+// Por defecto: '/tmp/cookies.txt'
 const COOKIES_PATH = process.env.COOKIES_PATH || '/tmp/cookies.txt';
 
 export const uploadSong = async (req, res) => {
@@ -81,10 +83,11 @@ export const downloadAndUploadSong = async (req, res) => {
 
   try {
     // Verificar si el archivo de cookies existe ANTES de intentar usarlo
+    // Ahora, COOKIES_PATH es la ruta donde Docker lo copió
     if (!fs.existsSync(COOKIES_PATH)) {
-      console.error(`❌ Error: El archivo de cookies no existe en la ruta: ${COOKIES_PATH}`);
-      // Devuelve 403 o 500 dependiendo de si consideras esto un error de configuración del server
-      return res.status(500).json({ error: 'Configuración de cookies no encontrada en el servidor.' });
+      console.error(`❌ Error: El archivo de cookies NO existe en la ruta: ${COOKIES_PATH}. Asegúrate de que el Dockerfile lo copie correctamente y la variable COOKIES_PATH esté bien configurada en Render.`);
+      // Devuelve un 500 porque es un problema de configuración del servidor
+      return res.status(500).json({ error: 'Configuración de cookies no encontrada en el servidor. Contacte al administrador.' });
     }
     console.log(`✅ Archivo de cookies encontrado en: ${COOKIES_PATH}`);
 
@@ -102,6 +105,7 @@ export const downloadAndUploadSong = async (req, res) => {
           console.error('⚠️ STDERR de yt-dlp (get-title):', stderr);
           // Mensaje más específico si el error es de autenticación
           if (stderr.includes("Sign in to confirm you’re not a bot") || stderr.includes("See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp")) {
+              // Rechaza con un error específico para el catch principal
               return reject(new Error('ACCESO_DENEGADO_AUTH_REQUIRED'));
           }
           return reject(new Error('FALLO_OBTENER_TITULO'));
@@ -183,21 +187,26 @@ export const downloadAndUploadSong = async (req, res) => {
     console.error('❌ Error en downloadAndUploadSong (catch principal):', err);
 
     let errorMessage = 'Error inesperado al procesar la solicitud.';
+    let statusCode = 500;
+
     if (err.message === 'ACCESO_DENEGADO_AUTH_REQUIRED') {
-        errorMessage = 'Este video requiere autenticación de YouTube. Sus cookies podrían estar caducadas o no ser válidas. Por favor, asegúrese de que la configuración de cookies del servidor sea correcta.';
-        return res.status(403).json({ error: errorMessage });
+        errorMessage = 'Este video requiere autenticación de YouTube. Las cookies configuradas en el servidor podrían estar caducadas o no ser válidas.';
+        statusCode = 403;
     } else if (err.message === 'FALLO_OBTENER_TITULO') {
         errorMessage = 'No se pudo obtener el título del video. Verifique la URL de YouTube.';
     } else if (err.message === 'FALLO_DESCARGA_YTDLP') {
         errorMessage = 'Hubo un error al descargar el audio. El video podría no estar disponible o tener restricciones.';
     } else if (err.message === 'FALLO_SPAWN_YTDLP') {
-        errorMessage = 'No se pudo iniciar el proceso de descarga. El sistema yt-dlp podría no estar instalado o configurado correctamente.';
+        errorMessage = 'No se pudo iniciar el proceso de descarga. El sistema yt-dlp podría no estar instalado o configurado correctamente en el servidor.';
     } else if (err.message === 'ARCHIVO_DESCARGADO_INVALIDO') {
-        errorMessage = 'El archivo de audio descargado está vacío o corrupto.';
-    } else if (err.message.includes('uploadErr') || err.message.includes('Cloudinary')) { // Errores de subida
+        errorMessage = 'El archivo de audio descargado está vacío o corrupto. Es posible que la descarga haya fallado silenciosamente.';
+    } else if (err.message.includes('uploadErr') || (err.http_code && err.http_code >= 400)) { // Errores de subida de Cloudinary
         errorMessage = 'Error al subir el archivo a Cloudinary. Verifique las credenciales.';
+        statusCode = 500;
     }
-    
+    // No necesitamos un `else if` para el error de `fs.existsSync` si ya lo retornamos antes
+    // o si el catch de arriba lo manejaría.
+
     // Asegurarse de limpiar el archivo descargado si existe
     if (outputFile && fs.existsSync(outputFile)) {
       try {
@@ -207,7 +216,7 @@ export const downloadAndUploadSong = async (req, res) => {
         console.error(`❌ Error al eliminar archivo tras otro error: ${outputFile}`, unlinkErr);
       }
     }
-    res.status(500).json({ error: errorMessage });
+    res.status(statusCode).json({ error: errorMessage });
   }
 };
 
