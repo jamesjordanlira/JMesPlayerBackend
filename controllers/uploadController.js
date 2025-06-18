@@ -23,11 +23,9 @@ if (!fs.existsSync(outputDir)) {
 const COOKIES_PATH = process.env.COOKIES_PATH || '/app/cookies.txt';
 
 // --- INICIO: Lógica para manejar el inicio del servidor con retraso ---
-// Esta lógica se ejecutará una vez cuando el módulo sea importado (al inicio de tu app)
 async function initializeCookiesCheck() {
-  // Añadir un pequeño retraso para asegurar que el sistema de archivos esté listo
-  // Esto es para mitigar posibles race conditions en entornos de contenedores
-  await new Promise(resolve => setTimeout(resolve, 1000)); // Espera 1 segundo
+  // Retraso breve para evitar race conditions
+  await new Promise(resolve => setTimeout(resolve, 1000));
 
   console.log(`--- INICIO DIAGNÓSTICO COOKIES ---`);
   console.log(`DEBUG: Valor de COOKIES_PATH: "${COOKIES_PATH}"`);
@@ -50,7 +48,6 @@ async function initializeCookiesCheck() {
     } catch (parentDirLsError) {
       console.error(`DEBUG: Error al listar directorio padre de cookies:`, parentDirLsError);
     }
-    // Lanza un error crítico que probablemente detendrá el inicio del servidor
     throw new Error(`CRITICAL: Archivo de cookies no encontrado en: ${COOKIES_PATH}`);
   } else {
     console.log(`✅ DEBUG: fs.existsSync(${COOKIES_PATH}) devolvió true. El archivo existe.`);
@@ -61,26 +58,18 @@ async function initializeCookiesCheck() {
       console.log(`✅ DEBUG: Estadísticas de cookies: size=${cookieStats.size}, mode=${cookieStats.mode.toString(8)}`);
     } catch (readErr) {
       console.error(`❌ DEBUG: Error al leer el archivo de cookies ${COOKIES_PATH} (posible problema de permisos):`, readErr);
-      // Lanza un error crítico si no se puede leer el archivo a pesar de existir
       throw new Error(`CRITICAL: No se pudo leer el archivo de cookies en: ${COOKIES_PATH} (permisos?)`);
     }
   }
   console.log(`--- FIN DIAGNÓSTICO COOKIES ---`);
 }
 
-// Llama a la función de inicialización. Si esto está en un archivo que es importado al inicio
-// de tu app (ej. en index.js o server.js), se ejecutará automáticamente.
-// Si tu servidor Express se inicia inmediatamente, considera poner el inicio del servidor
-// DENTRO de un .then() de esta promesa, o usa un patrón async/await en tu archivo principal.
-// Para este caso, como es un controlador, lo dejamos así y la comprobación se ejecuta.
 initializeCookiesCheck().catch(err => {
   console.error('❌ Fallo crítico en la verificación inicial de cookies:', err.message);
-  // Opcional: Podrías usar process.exit(1) aquí para detener el contenedor si es un error fatal
   // process.exit(1);
 });
-// --- FIN: Lógica para manejar el inicio del servidor con retraso ---
 
-
+// Función para subir canciones ya cargadas
 export const uploadSong = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -106,7 +95,6 @@ export const uploadSong = async (req, res) => {
       fs.unlinkSync(file.path);
       console.log(`🗑️ Archivo temporal eliminado: ${file.path}`);
 
-
       return {
         secure_url: result.secure_url,
         title: file.originalname
@@ -120,6 +108,7 @@ export const uploadSong = async (req, res) => {
   }
 };
 
+// Función para descargar canción desde URL y subirla
 export const downloadAndUploadSong = async (req, res) => {
   const { url } = req.body;
 
@@ -134,26 +123,22 @@ export const downloadAndUploadSong = async (req, res) => {
   let outputFile = null;
 
   try {
-    // Esta verificación adicional dentro de la función de ruta es buena práctica,
-    // pero si la inicialización falló con un error crítico, el servidor no estaría corriendo.
     if (!fs.existsSync(COOKIES_PATH)) {
       console.error(`❌ Error (runtime check): El archivo de cookies no existe en la ruta: ${COOKIES_PATH}`);
       return res.status(500).json({ error: 'Configuración de cookies no encontrada en el servidor. Contacte al administrador.' });
     }
-    // No volvemos a loguear "Archivo de cookies encontrado" si ya lo hizo el diagnóstico inicial
 
-
-    // --- Paso 1: Obtener el título usando yt-dlp ---
+    // Obtener título con yt-dlp (rápido)
     const getTitleCmd = `yt-dlp --cookies "${COOKIES_PATH}" --get-title "${url}"`;
     console.log(`ℹ️ Ejecutando comando para obtener título: ${getTitleCmd}`);
 
     const { stdout, stderr } = await new Promise((resolve, reject) => {
-      exec(getTitleCmd, (err, stdout, stderr) => {
+      exec(getTitleCmd, { timeout: 10000 }, (err, stdout, stderr) => {
         if (err) {
           console.error('❌ Error en exec (obtener título):', err);
           console.error('⚠️ STDERR de yt-dlp (get-title):', stderr);
-          if (stderr.includes("Sign in to confirm you’re not a bot") || stderr.includes("See https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp")) {
-              return reject(new Error('ACCESO_DENEGADO_AUTH_REQUIRED'));
+          if (stderr.includes("Sign in to confirm you’re not a bot") || stderr.includes("FAQ#how-do-i-pass-cookies-to-yt-dlp")) {
+            return reject(new Error('ACCESO_DENEGADO_AUTH_REQUIRED'));
           }
           return reject(new Error('FALLO_OBTENER_TITULO'));
         }
@@ -167,7 +152,7 @@ export const downloadAndUploadSong = async (req, res) => {
     console.log(`🎵 Título obtenido: "${title}". Archivo de salida esperado: ${outputFile}`);
     console.log(`🎵 Iniciando descarga de audio de: ${url}`);
 
-    // --- Paso 2: Descargar el audio usando yt-dlp ---
+    // Descargar audio con yt-dlp y convertir a mp3
     const ytdlp = spawn('yt-dlp', [
       '--cookies', COOKIES_PATH,
       '-x',
@@ -180,6 +165,7 @@ export const downloadAndUploadSong = async (req, res) => {
       console.error(`⚠️ yt-dlp STDERR (descarga): ${data.toString().trim()}`);
     });
 
+    // Promesa para esperar descarga
     const downloadPromise = new Promise((resolve, reject) => {
       ytdlp.on('close', (code) => {
         if (code !== 0) {
@@ -191,19 +177,20 @@ export const downloadAndUploadSong = async (req, res) => {
       });
 
       ytdlp.on('error', (spawnErr) => {
-          console.error('❌ Error al iniciar el proceso yt-dlp:', spawnErr);
-          reject(new Error('FALLO_SPAWN_YTDLP'));
+        console.error('❌ Error al iniciar el proceso yt-dlp:', spawnErr);
+        reject(new Error('FALLO_SPAWN_YTDLP'));
       });
     });
 
     await downloadPromise;
 
-    // --- Paso 3: Subir el archivo descargado a Cloudinary ---
+    // Verificar archivo válido
     if (!fs.existsSync(outputFile) || fs.statSync(outputFile).size === 0) {
-        console.error(`❌ El archivo descargado no existe o está vacío: ${outputFile}`);
-        throw new Error('ARCHIVO_DESCARGADO_INVALIDO');
+      console.error(`❌ El archivo descargado no existe o está vacío: ${outputFile}`);
+      throw new Error('ARCHIVO_DESCARGADO_INVALIDO');
     }
 
+    // Subir a Cloudinary
     console.log(`☁️ Subiendo archivo a Cloudinary: ${outputFile}`);
     const result = await cloudinary.uploader.upload(outputFile, {
       resource_type: 'video',
@@ -216,7 +203,7 @@ export const downloadAndUploadSong = async (req, res) => {
 
     console.log(`☁️ Archivo subido a Cloudinary: ${result.secure_url}`);
 
-    // --- Paso 4: Eliminar el archivo local después de subirlo a Cloudinary ---
+    // Borrar archivo local
     fs.unlinkSync(outputFile);
     console.log(`🗑️ Archivo local eliminado después de subirlo: ${outputFile}`);
 
@@ -232,36 +219,35 @@ export const downloadAndUploadSong = async (req, res) => {
     let statusCode = 500;
 
     if (err.message === 'ACCESO_DENEGADO_AUTH_REQUIRED') {
-        errorMessage = 'Este video requiere autenticación de YouTube. Las cookies configuradas en el servidor podrían estar caducadas o no ser válidas.';
-        statusCode = 403;
+      errorMessage = 'Este video requiere autenticación de YouTube. Las cookies podrían estar caducadas o inválidas.';
+      statusCode = 403;
     } else if (err.message === 'FALLO_OBTENER_TITULO') {
-        errorMessage = 'No se pudo obtener el título del video. Verifique la URL de YouTube.';
+      errorMessage = 'No se pudo obtener el título del video. Verifique la URL de YouTube.';
     } else if (err.message === 'FALLO_DESCARGA_YTDLP') {
-        errorMessage = 'Hubo un error al descargar el audio. El video podría no estar disponible o tener restricciones.';
+      errorMessage = 'Error al descargar el audio. El video podría no estar disponible o tener restricciones.';
     } else if (err.message === 'FALLO_SPAWN_YTDLP') {
-        errorMessage = 'No se pudo iniciar el proceso de descarga. El sistema yt-dlp podría no estar instalado o configurado correctamente en el servidor.';
+      errorMessage = 'No se pudo iniciar el proceso de descarga. Verifique yt-dlp en el servidor.';
     } else if (err.message === 'ARCHIVO_DESCARGADO_INVALIDO') {
-        errorMessage = 'El archivo de audio descargado está vacío o corrupto. Es posible que la descarga haya fallado silenciosamente.';
+      errorMessage = 'El archivo descargado está vacío o corrupto.';
     } else if (err.message.includes('uploadErr') || (err.http_code && err.http_code >= 400)) {
-        errorMessage = 'Error al subir el archivo a Cloudinary. Verifique las credenciales.';
-        statusCode = 500;
+      errorMessage = 'Error al subir el archivo a Cloudinary. Verifique las credenciales.';
     } else if (err.message.includes('CRITICAL: Archivo de cookies no encontrado') || err.message.includes('CRITICAL: No se pudo leer el archivo de cookies')) {
-        errorMessage = err.message; // Usar el mensaje detallado del error crítico de inicio
-        statusCode = 500;
+      errorMessage = err.message;
     }
-    
+
     if (outputFile && fs.existsSync(outputFile)) {
       try {
         fs.unlinkSync(outputFile);
         console.log(`🗑️ Archivo local eliminado tras error: ${outputFile}`);
       } catch (unlinkErr) {
-        console.error(`❌ Error al eliminar archivo tras otro error: ${outputFile}`, unlinkErr);
+        console.error(`❌ Error al eliminar archivo tras error: ${outputFile}`, unlinkErr);
       }
     }
     res.status(statusCode).json({ error: errorMessage });
   }
 };
 
+// Obtener canciones del usuario
 export const getSongs = async (req, res) => {
   try {
     const user = req.usuario;
