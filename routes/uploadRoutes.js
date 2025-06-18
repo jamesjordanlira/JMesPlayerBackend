@@ -7,7 +7,7 @@ const router = express.Router();
 const upload = multer({ dest: 'uploads/' });
 
 // Subir archivos locales (protegido)
-router.post('/upload', checkAuth, upload.array('file', 10), uploadSong);
+router.post('/upload', checkAuth, upload.array('file', 50), uploadSong);
 
 // Obtener canciones del usuario (protegido)
 router.get('/songs', checkAuth, getSongs);
