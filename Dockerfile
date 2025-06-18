@@ -31,7 +31,8 @@ RUN chmod 644 /tmp/cookies.txt
 
 # Si necesitas un directorio de descargas temporal, créalo y asegúrate de permisos
 RUN mkdir -p /tmp/descargas && chmod -R 777 /tmp/descargas
-
+#debug
+RUN ls -l /tmp/ && head -n 10 /tmp/cookies.txt
 
 # Expone el puerto que usará tu app (ajusta si usas otro puerto)
 EXPOSE 3000
